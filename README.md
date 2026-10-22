@@ -7,10 +7,12 @@ A pre-trade gate for AI agents on Robinhood Chain. Before your agent buys a toke
 ## Install
 
 ```
-claude mcp add actuary -- node /path/to/actuary/mcp/server.mjs
+git clone https://github.com/actuaryai/mcp.git
+cd mcp && npm install
+claude mcp add actuary -- node /absolute/path/to/mcp/server.mjs
 ```
 
-Needs Node 20+. Run `npm install` in this folder first. Set `ACTUARY_API` to use another server (default `https://actuaryai.pro`).
+Needs Node 20+. Set `ACTUARY_API` to use another server (default `https://actuaryai.pro`).
 
 ## Tools
 
