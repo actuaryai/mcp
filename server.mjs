@@ -229,13 +229,48 @@ server.registerTool(
     title: "Keep checking a held token",
     description:
       'For a token you already hold: Actuary re-checks it against your policy about every 30 minutes and POSTs to your https webhook when the decision changes or the contract changes (owner, implementation, mint/pause/blacklist, supply). Returns a mandate id and a secret. Store the secret: it verifies webhook signatures (X-Actuary-Signature = sha256 HMAC of "<timestamp>.<body>") and is needed to read or cancel the mandate. It is not shown again.',
-    inputSchema: { token: z.string(), webhook_url: z.string().url().describe("Public https URL that receives the events"), policy: policySchema },
+    inputSchema: { token: z.string(), webhook_url: z.string().url().optional().describe("Optional public https URL. Leave out and poll mandate_events instead."), policy: policySchema },
     annotations: { readOnlyHint: false, openWorldHint: true },
   },
   async ({ token, webhook_url, policy }) => {
     if (!ADDRESS.test(String(token).trim())) return fail("That is not a valid 0x address (40 hex characters).");
     try {
-      return text(await api("POST", "/api/v1/mandates", { token: token.trim(), webhook_url, policy: policy ?? "actuary-default-v1" }));
+      return text(await api("POST", "/api/v1/mandates", { token: token.trim(), ...(webhook_url ? { webhook_url } : {}), policy: policy ?? "actuary-default-v1" }));
+    } catch (e) {
+      return fail(String(e.message ?? e));
+    }
+  },
+);
+
+server.registerTool(
+  "mandate_events",
+  {
+    title: "Poll a mandate",
+    description: "Events a mandate recorded since a unix time (0 = all): decision changes, contract changes, created, cancelled. Use next_since for the next poll.",
+    inputSchema: { id: z.string(), secret: z.string(), since: z.number().optional() },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  async ({ id, secret, since }) => {
+    try {
+      return text(await api("GET", `/api/v1/mandates/${id.trim()}/events?since=${Math.max(0, Math.floor(since ?? 0))}`, undefined, secret.trim()));
+    } catch (e) {
+      return fail(String(e.message ?? e));
+    }
+  },
+);
+
+server.registerTool(
+  "gate_batch",
+  {
+    title: "Gate several tokens",
+    description: "Gate up to 10 tokens against one policy in one call, one receipt each. Counts as one Gate call per token; past the free tier it pays one x402 payment for the total (when a pay key is set).",
+    inputSchema: { tokens: z.array(z.string()).min(1).max(10), policy: policySchema },
+    annotations: { readOnlyHint: false, openWorldHint: true },
+  },
+  async ({ tokens, policy }) => {
+    try {
+      const d = await api("POST", "/api/v1/gate/batch", { tokens, policy: policy ?? "actuary-default-v1" });
+      return text({ count: d.count, results: d.results.map(({ receipt, ...r }) => r), payment: d.payment ?? null });
     } catch (e) {
       return fail(String(e.message ?? e));
     }

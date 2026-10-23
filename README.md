@@ -4,7 +4,15 @@ A pre-trade gate for AI agents on Robinhood Chain. Before your agent buys a toke
 
 **Status: live, rule-based.** Answers come from the open rule engine (`engine: "rules-v1"`). The model is not answering yet; when it does, the receipt will say so. Not financial advice.
 
-## Install
+## Connect by URL (no install)
+
+```
+claude mcp add --transport http actuary https://actuaryai.pro/mcp
+```
+
+The hosted server has the agent tools (gate, gate_batch, gate_facts, get_receipt, verify_receipt, mandates). Run this local server instead when your agent should pay per call on its own (see below).
+
+## Install locally
 
 ```
 git clone https://github.com/actuaryai/mcp.git
@@ -21,7 +29,9 @@ Needs Node 20+. Set `ACTUARY_API` to use another server (default `https://actuar
 | `gate` | Token + policy → ALLOW / DENY / REVIEW, every check with the fact it read, and a signed receipt |
 | `gate_facts` | The facts a policy may use, the rule syntax and the presets |
 | `verify_receipt` | Checks a receipt's signature and that nothing in it was changed |
-| `create_mandate` | Keep checking a held token; webhook when the decision or the contract changes |
+| `gate_batch` | Up to 10 tokens against one policy, one receipt each |
+| `create_mandate` | Keep checking a held token; poll events, or a webhook when the decision or the contract changes |
+| `mandate_events` | Poll the events a mandate recorded |
 | `mandate_status` | Current decision, last check, delivery failures |
 | `cancel_mandate` | Stop a mandate |
 | `check_token`, `premortem`, `autopsy_token` | The original verdict, launch pre-mortem and autopsy tools |
