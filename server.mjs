@@ -15,7 +15,7 @@ import { privateKeyToAccount } from "viem/accounts";
 const API = (process.env.ACTUARY_API ?? "https://actuaryai.pro").replace(/\/$/, "");
 const BS = "https://robinhoodchain.blockscout.com/api/v2";
 const GT = "https://api.geckoterminal.com/api/v2/networks/robinhood";
-const SHARDS = "https://raw.githubusercontent.com/coroner-hash/ai/main/data/shards";
+const SHARDS = "https://raw.githubusercontent.com/actuaryai/data/main/data/shards";
 const DEAD = new Set(["0x0000000000000000000000000000000000000000", "0x000000000000000000000000000000000000dead"]);
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const UA = { "user-agent": "actuary-mcp/0.1", accept: "application/json" };
