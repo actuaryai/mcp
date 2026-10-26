@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Actuary MCP server (stdio). A pre-trade gate for AI agents on Robinhood Chain.
-// Tools: gate, gate_facts, verify_receipt, create_mandate, mandate_status, cancel_mandate,
+// Tools: gate, gate_batch, gate_facts, verify_receipt, create_mandate, renew_mandate, mandate_status, mandate_events,
+// cancel_mandate,
 // plus check_token, premortem and autopsy_token from the original engine.
 //
 // Market and holder data are read from THIS machine (Blockscout and GeckoTerminal block cloud servers),
@@ -20,10 +21,11 @@ const DEAD = new Set(["0x0000000000000000000000000000000000000000", "0x000000000
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const UA = { "user-agent": "actuary-mcp/0.1", accept: "application/json" };
 
-// Optional x402 pay-per-call. After the free daily Gate calls, the server answers 402 with a quote in USDG on
-// Robinhood Chain. If ACTUARY_PAY_KEY_FILE points to a file holding a wallet's private key, the gate tool signs that
-// quote (EIP-3009) and resends, never above ACTUARY_MAX_USD per call (default 0.01). No file, no payments.
-const MAX_USD = Number(process.env.ACTUARY_MAX_USD ?? 0.01);
+// Optional x402 payments. Past the free daily Gate calls a Gate call costs $0.002, and a Mandate costs $0.05 for 7 days;
+// the server answers 402 with a quote in USDG on Robinhood Chain. If ACTUARY_PAY_KEY_FILE points to a file holding a
+// wallet's private key, this server signs that quote (EIP-3009) and resends, never above ACTUARY_MAX_USD per call
+// (default 0.05). No file, no payments.
+const MAX_USD = Number(process.env.ACTUARY_MAX_USD ?? 0.05);
 let payer = null;
 if (process.env.ACTUARY_PAY_KEY_FILE) {
   try {
@@ -66,7 +68,7 @@ async function api(method, path, body, bearer) {
   if (r.status === 402) {
     const quote = await r.json().catch(() => ({}));
     if (!quote.accepts?.length) throw new Error(`Actuary API 402: ${quote.code ?? quote.error ?? "payment failed"}${quote.detail ? ` (${quote.detail})` : ""}`);
-    if (!payer) throw new Error(`The free Gate calls for today are used up. Paid calls cost $${Number(quote.accepts[0].amount) / 1e6} in USDG on Robinhood Chain over x402: set ACTUARY_PAY_KEY_FILE to enable them.`);
+    if (!payer) throw new Error(`${quote.resource?.description ?? "This call"}: $${Number(quote.accepts[0].amount) / 1e6} in USDG on Robinhood Chain over x402. Set ACTUARY_PAY_KEY_FILE to let this server pay it.`);
     headers["PAYMENT-SIGNATURE"] = await signQuote(quote);
     r = await send();
   }
@@ -139,7 +141,7 @@ function summarize(d, gaps = []) {
   };
 }
 
-const server = new McpServer({ name: "actuary", version: "0.1.0" });
+const server = new McpServer({ name: "actuary", version: "0.2.0" });
 
 // ---------- Gate ----------
 const policySchema = z
@@ -172,6 +174,7 @@ server.registerTool(
       return text({
         decision: d.decision,
         reasons: d.reasons,
+        explanation: r.explanation ?? null,
         checks: r.checks.map((c) => ({ rule: `${c.list}: ${c.rule}`, result: c.result, read: c.facts })),
         receipt_id: r.id,
         receipt_url: `${API}${d.receipt_url}`,
@@ -228,7 +231,7 @@ server.registerTool(
   {
     title: "Keep checking a held token",
     description:
-      'For a token you already hold: Actuary re-checks it against your policy about every 30 minutes and POSTs to your https webhook when the decision changes or the contract changes (owner, implementation, mint/pause/blacklist, supply). Returns a mandate id and a secret. Store the secret: it verifies webhook signatures (X-Actuary-Signature = sha256 HMAC of "<timestamp>.<body>") and is needed to read or cancel the mandate. It is not shown again.',
+      'For a token you already hold: Actuary re-checks it against your policy about every 30 minutes for 7 days and records an event (and POSTs to your https webhook, if given) when the decision changes or the contract changes (owner, implementation, mint/pause/blacklist, supply). Costs $0.05 in USDG over x402 (paid by this server when ACTUARY_PAY_KEY_FILE is set; nothing is charged if creation fails). Returns a mandate id, a secret and expires_at. Store the secret: it verifies webhook signatures (X-Actuary-Signature = sha256 HMAC of "<timestamp>.<body>") and is needed to read, renew or cancel the mandate. It is not shown again.',
     inputSchema: { token: z.string(), webhook_url: z.string().url().optional().describe("Optional public https URL. Leave out and poll mandate_events instead."), policy: policySchema },
     annotations: { readOnlyHint: false, openWorldHint: true },
   },
@@ -246,7 +249,7 @@ server.registerTool(
   "mandate_events",
   {
     title: "Poll a mandate",
-    description: "Events a mandate recorded since a unix time (0 = all): decision changes, contract changes, created, cancelled. Use next_since for the next poll.",
+    description: "Events a mandate recorded since a unix time (0 = all): decision changes, contract changes, created, expiring (a day before the end), expired, renewed, cancelled. Use next_since for the next poll.",
     inputSchema: { id: z.string(), secret: z.string(), since: z.number().optional() },
     annotations: { readOnlyHint: true, openWorldHint: true },
   },
@@ -278,10 +281,27 @@ server.registerTool(
 );
 
 server.registerTool(
+  "renew_mandate",
+  {
+    title: "Renew a mandate",
+    description: "Adds 7 more days to a mandate, counted from its current end (or from now if it already expired). Costs $0.05 in USDG over x402, paid by this server when ACTUARY_PAY_KEY_FILE is set.",
+    inputSchema: { id: z.string().describe("mnd_..."), secret: z.string().describe("The secret returned by create_mandate") },
+    annotations: { readOnlyHint: false, openWorldHint: true },
+  },
+  async ({ id, secret }) => {
+    try {
+      return text(await api("POST", `/api/v1/mandates/${id.trim()}/renew`, undefined, secret.trim()));
+    } catch (e) {
+      return fail(String(e.message ?? e));
+    }
+  },
+);
+
+server.registerTool(
   "mandate_status",
   {
     title: "Read a mandate",
-    description: "Current decision, last check, last event and delivery failures of a mandate.",
+    description: "Current decision, last check, last event, expiry and delivery failures of a mandate.",
     inputSchema: { id: z.string().describe("mnd_..."), secret: z.string().describe("The secret returned by create_mandate") },
     annotations: { readOnlyHint: true, openWorldHint: true },
   },
