@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Actuary MCP server (stdio). A pre-trade gate for AI agents on Robinhood Chain.
 // Tools: gate, gate_batch, gate_facts, verify_receipt, create_mandate, renew_mandate, mandate_status, mandate_events,
-// cancel_mandate,
+// mandate_signal, verify_signal, cancel_mandate,
 // plus check_token, premortem and autopsy_token from the original engine.
 //
 // Market and holder data are read from THIS machine (Blockscout and GeckoTerminal block cloud servers),
@@ -141,7 +141,7 @@ function summarize(d, gaps = []) {
   };
 }
 
-const server = new McpServer({ name: "actuary", version: "0.3.0" });
+const server = new McpServer({ name: "actuary", version: "0.4.0" });
 
 // ---------- Gate ----------
 const policySchema = z
@@ -233,14 +233,19 @@ server.registerTool(
   {
     title: "Keep checking a held token",
     description:
-      'For a token you already hold: Actuary re-checks it against your policy about every 30 minutes for 7 days and records an event (and POSTs to your https webhook, if given) when the decision changes or the contract changes (owner, implementation, mint/pause/blacklist, supply). Costs $0.05 in USDG over x402 (paid by this server when ACTUARY_PAY_KEY_FILE is set; nothing is charged if creation fails). Returns a mandate id, a secret and expires_at. Store the secret: it verifies webhook signatures (X-Actuary-Signature = sha256 HMAC of "<timestamp>.<body>") and is needed to read, renew or cancel the mandate. It is not shown again.',
-    inputSchema: { token: z.string(), webhook_url: z.string().url().optional().describe("Optional public https URL. Leave out and poll mandate_events instead."), policy: policySchema },
+      'For a token you already hold: Actuary re-checks it against your policy about every 30 minutes for 7 days and records an event (and POSTs to your https webhook, if given) when the decision changes or the contract changes (owner, implementation, mint/pause/blacklist, supply). Costs $0.05 in USDG over x402 (paid by this server when ACTUARY_PAY_KEY_FILE is set; nothing is charged if creation fails). Every event carries a signed signal: exit (decision DENY, or REVIEW with exit_on "review"), watch or hold; check it with verify_signal before acting. Actuary never trades for you. Returns a mandate id, a secret and expires_at. Store the secret: it verifies webhook signatures (X-Actuary-Signature = sha256 HMAC of "<timestamp>.<body>") and is needed to read, renew or cancel the mandate. It is not shown again.',
+    inputSchema: {
+      token: z.string(),
+      webhook_url: z.string().url().optional().describe("Optional public https URL. Leave out and poll mandate_events instead."),
+      policy: policySchema,
+      exit_on: z.enum(["deny", "review"]).optional().describe("When the signal says exit: on DENY (default) or on REVIEW too."),
+    },
     annotations: { readOnlyHint: false, openWorldHint: true },
   },
-  async ({ token, webhook_url, policy }) => {
+  async ({ token, webhook_url, policy, exit_on }) => {
     if (!ADDRESS.test(String(token).trim())) return fail("That is not a valid 0x address (40 hex characters).");
     try {
-      return text(await api("POST", "/api/v1/mandates", { token: token.trim(), ...(webhook_url ? { webhook_url } : {}), policy: policy ?? "actuary-default-v1" }));
+      return text(await api("POST", "/api/v1/mandates", { token: token.trim(), ...(webhook_url ? { webhook_url } : {}), ...(exit_on ? { exit_on } : {}), policy: policy ?? "actuary-default-v1" }));
     } catch (e) {
       return fail(String(e.message ?? e));
     }
@@ -258,6 +263,40 @@ server.registerTool(
   async ({ id, secret, since }) => {
     try {
       return text(await api("GET", `/api/v1/mandates/${id.trim()}/events?since=${Math.max(0, Math.floor(since ?? 0))}`, undefined, secret.trim()));
+    } catch (e) {
+      return fail(String(e.message ?? e));
+    }
+  },
+);
+
+server.registerTool(
+  "mandate_signal",
+  {
+    title: "What now for a held token",
+    description: "The newest signed signal for a mandate, from its last decision: exit, watch or hold, valid for one hour. Verify it with verify_signal; your own code decides whether to sell. Actuary never trades.",
+    inputSchema: { id: z.string(), secret: z.string() },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  async ({ id, secret }) => {
+    try {
+      return text(await api("GET", `/api/v1/mandates/${id.trim()}/signal`, undefined, secret.trim()));
+    } catch (e) {
+      return fail(String(e.message ?? e));
+    }
+  },
+);
+
+server.registerTool(
+  "verify_signal",
+  {
+    title: "Verify a mandate signal",
+    description: "Checks that a signal was signed by Actuary, that nothing in it changed (valid) and that it has not expired (fresh). Act only when both are true.",
+    inputSchema: { signal: z.record(z.any()).describe("The signal object from a mandate event or mandate_signal") },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  async ({ signal }) => {
+    try {
+      return text(await api("POST", "/api/v1/signals/verify", { signal }));
     } catch (e) {
       return fail(String(e.message ?? e));
     }

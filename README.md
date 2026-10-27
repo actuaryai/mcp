@@ -32,7 +32,9 @@ Needs Node 20+. Set `ACTUARY_API` to use another server (default `https://actuar
 | `gate_batch` | Up to 10 tokens against one policy, one receipt each |
 | `create_mandate` | Keep checking a held token for 7 days ($0.05); poll events, or a webhook when the decision or the contract changes |
 | `renew_mandate` | 7 more days on a mandate ($0.05) |
-| `mandate_events` | Poll the events a mandate recorded |
+| `mandate_events` | Poll the events a mandate recorded, each with a signed signal |
+| `mandate_signal` | The newest signed signal: exit, watch or hold |
+| `verify_signal` | Checks a signal is ours, untouched and fresh before your agent acts |
 | `mandate_status` | Current decision, last check, expiry, delivery failures |
 | `cancel_mandate` | Stop a mandate |
 | `check_token`, `premortem`, `autopsy_token` | The original verdict, launch pre-mortem and autopsy tools |
@@ -61,6 +63,10 @@ With `"judge": "advisory"` or `"resolve"` in a policy (or the preset `actuary-ju
 ## Mandate webhooks
 
 `POST` to your https URL with `X-Actuary-Event`, `X-Actuary-Timestamp` and `X-Actuary-Signature: sha256=<HMAC-SHA256(secret, "<timestamp>.<body>")>`. Events: `mandate.decision_changed`, `mandate.contract_changed` (owner, implementation, mint/pause/blacklist, supply moved 1%+), `mandate.expiring` (a day before the end), `mandate.expired`, `mandate.test`. Checks run about every 30 minutes. A mandate stops after 20 failed deliveries.
+
+## Mandate signals
+
+Every mandate event with a decision carries a `signal`: `exit` when the decision is DENY (or REVIEW, with `exit_on: "review"`), `watch` on REVIEW, `hold` on ALLOW. It is EIP-712 signed by the receipt signer and expires an hour after issue. **Actuary never trades and never holds funds**: your agent verifies the signal (`verify_signal`, valid and fresh) and its own code decides whether to sell.
 
 ## Mandate pricing
 
