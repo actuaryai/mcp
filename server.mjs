@@ -141,17 +141,18 @@ function summarize(d, gaps = []) {
   };
 }
 
-const server = new McpServer({ name: "actuary", version: "0.2.0" });
+const server = new McpServer({ name: "actuary", version: "0.3.0" });
 
 // ---------- Gate ----------
 const policySchema = z
   .union([
-    z.string().describe('A preset name: "actuary-default-v1" or "no-clones-v1"'),
+    z.string().describe('A preset name: "actuary-default-v1", "actuary-judged-v1" (same rules, a model settles a REVIEW) or "no-clones-v1"'),
     z.object({
       policy: z.string().describe("A short name for your policy, e.g. my-agent-v1"),
       deny_if: z.array(z.string()).default([]).describe('Rules that block the trade, e.g. "mint_with_live_owner", "first_hour_swaps < 20", "!in_collector"'),
       review_if: z.array(z.string()).default([]).describe("Rules that ask for a closer look instead of blocking"),
       unknown: z.enum(["review", "deny", "allow"]).optional().describe("What a deny rule with missing data means. Default review."),
+      judge: z.enum(["advisory", "resolve"]).optional().describe("When the rules say REVIEW, a model leans ALLOW/REVIEW/DENY. advisory: recorded only. resolve: applied at 75% confidence or more; ALLOW only if every deny rule read false. Omit for rules only."),
     }),
   ])
   .optional()
@@ -162,7 +163,7 @@ server.registerTool(
   {
     title: "Gate a token against a policy",
     description:
-      "Call BEFORE buying a token on Robinhood Chain. Applies your policy to on-chain and open-collector facts and returns ALLOW, DENY or REVIEW, the rules that fired with the facts they read, and a signed receipt you can keep as proof of why you traded or did not. Rule-based; missing data never results in ALLOW unless your policy says so. Not financial advice.",
+      "Call BEFORE buying a token on Robinhood Chain. Applies your policy to on-chain and open-collector facts and returns ALLOW, DENY or REVIEW, the rules that fired with the facts they read, and a signed receipt you can keep as proof of why you traded or did not. Rules decide; with judge in the policy a model can settle a REVIEW, never overrule an ALLOW or DENY. Missing data never results in ALLOW unless your policy says so. Not financial advice.",
     inputSchema: { token: z.string().describe("Token contract address (0x...)"), policy: policySchema },
     annotations: { readOnlyHint: false, openWorldHint: true },
   },
@@ -175,6 +176,7 @@ server.registerTool(
         decision: d.decision,
         reasons: d.reasons,
         explanation: r.explanation ?? null,
+        ...(r.judgement !== undefined ? { rule_decision: r.rule_decision, judgement: r.judgement } : {}),
         checks: r.checks.map((c) => ({ rule: `${c.list}: ${c.rule}`, result: c.result, read: c.facts })),
         receipt_id: r.id,
         receipt_url: `${API}${d.receipt_url}`,

@@ -1,6 +1,6 @@
 {
   "name": "actuary-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "MCP server for Actuary: a pre-trade gate for AI agents on Robinhood Chain. Policy, Gate, Mandate and signed Receipts. Rule-based today.",
   "type": "module",
   "bin": {

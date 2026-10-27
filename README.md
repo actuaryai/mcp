@@ -54,7 +54,9 @@ Rules: `fact`, `!fact`, or `fact < number` (`<`, `<=`, `>`, `>=`, `==`, `!=`). A
 
 Signed with EIP-712, domain `{ name: "Actuary", version: "1", chainId: 4663 }`, type `Receipt(string id, address token, string decision, bytes32 policyHash, bytes32 bodyHash, uint64 issuedAt)`. `bodyHash` covers every check, fact, reason and source, and the `explanation` when there is one. The signer address is published at `GET /api/v1/receipts/signer`.
 
-The `explanation` puts the checks into two plain sentences. A model writes it (`explanation_model`, on Cloudflare Workers AI) from the checks and the published fact meanings only; answers that add numbers, talk about prices or advice are dropped, and the receipt is then issued without one. The decision itself always comes from the rules.
+The `explanation` puts the checks into two plain sentences. A model writes it (`explanation_model`, on Cloudflare Workers AI) from the checks and the published fact meanings only; answers that add numbers, talk about prices or advice are dropped, and the receipt is then issued without one. The explanation never changes the decision.
+
+With `"judge": "advisory"` or `"resolve"` in a policy (or the preset `actuary-judged-v1`), a model reads a REVIEW and leans ALLOW, REVIEW or DENY with a confidence, the facts it relied on and one sentence. ALLOW and DENY from the rules are final. `advisory` only records the lean; `resolve` applies it at 75% confidence or more, and an ALLOW only when every deny rule read false. The receipt keeps `rule_decision`, the final `decision` and the signed `judgement`.
 
 ## Mandate webhooks
 
