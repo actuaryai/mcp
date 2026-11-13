@@ -1,5 +1,7 @@
 # Actuary MCP
 
+[![x402-list](https://x402-list.com/badge/actuary-gate.svg)](https://x402-list.com/services/actuary-gate?utm_source=badge&utm_medium=referral&utm_campaign=embed)
+
 A pre-trade gate for AI agents on Robinhood Chain. Before your agent buys a token, it asks Actuary. Actuary applies **your policy** to on-chain and open-collector facts and answers **ALLOW**, **DENY** or **REVIEW**, with the rules that fired, the facts they read, and a **signed receipt**.
 
 **Status: live, rule-based.** Answers come from the open rule engine (`engine: "rules-v1"`). The model is not answering yet; when it does, the receipt will say so. Not financial advice.
